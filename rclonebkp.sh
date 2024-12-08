@@ -12,6 +12,11 @@ STORE_SNAPSHOTS_FILE=
 TEMP_SNAPSHOTS_FILE=
 TEMP_SNAPSHOTS_FILE_NEW=
 
+store_path=
+temp_dir=
+flag_force=false
+flag_readable=false
+
 show_usage(){
   echo "Usage:
   $0 <store_path> <command> [options...]
@@ -200,8 +205,9 @@ lock(){
 }
 
 # 对目标库解锁，允许其他进程操作
+# 没有锁文件，则相当于解锁
 unlock(){
-  rclone delete "${store_path}/caman-meta/caman.lock" && return 0
+  rclone_ignore_not_found delete "${store_path}/caman-meta/caman.lock" && return 0
   echo "unlock $store_path failed"
   return 1
 }
@@ -330,8 +336,46 @@ filter_option() {
     fi
   done
 
-  # Return the filtered arguments as a string
-  echo "${filtered_args[@]}"
+  # Return the filtered arguments as a string, with a '\n' between each argument
+  printf "%s\n" "${filtered_args[@]}"
+}
+
+filter_option_self() {
+  local option="$1"
+  shift
+
+  local args=("$@")
+  local filtered_args=()
+  for arg in "${args[@]}"; do
+    if [[ "$arg" == "$option" ]]; then
+      continue
+    else
+      filtered_args+=("$arg")
+    fi
+  done
+
+  # Return the filtered arguments as a string, with a '\n' between each argument
+  printf "%s\n" "${filtered_args[@]}"
+}
+
+has_force_option() {
+  local args=("$@")
+  for arg in "${args[@]}"; do
+    if [[ "$arg" == "-f" ]]; then
+      flag_force=true
+      break
+    fi
+  done
+}
+
+has_readable_option() {
+  local args=("$@")
+  for arg in "${args[@]}"; do
+    if [[ "$arg" == "-h" ]]; then
+      flag_readable=true
+      break
+    fi
+  done 
 }
 
 # Check if the --log-file argument is present in the arguments
@@ -625,7 +669,7 @@ cmd_init(){
 # 删除备份库
 # -f 强制删除
 cmd_delete(){
-  if [ "$1" != "-f" ]; then
+  if [ "$flag_force" != true ]; then
     read -p "Are you sure you want to delete the $store_path directory? [yes/No] " reply leftover
     if [[ "$reply" != y* && "$reply" != Y* ]]; then
       echo "Deletion cancelled."
@@ -669,7 +713,9 @@ cmd_backup(){
 
   local btime=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   local bkp_dir=$(date -u +%Y%m%d%H%M%S)
-  local new_args=($(filter_option "--backup-dir"  "$@"))
+  local new_args=$(filter_option "--backup-dir"  "$@")
+
+  IFS=$'\n' read -r -d '' -a new_args <<<"$new_args"
   if ! has_log_file "${new_args[@]}"; then
     new_args+=("--log-file" "$temp_dir/backup.log")
   fi
@@ -679,15 +725,15 @@ cmd_backup(){
   if [ "$backup_type" = "$INCREMENTAL" ]; then
     cmd="copy"
     if [ "$last_bkp_time" != "" ]; then
-      new_args=($(filter_option "--max-age" "${new_args[@]}"))
+      new_args=$(filter_option "--max-age" "${new_args[@]}")
+      IFS=$'\n' read -r -d '' -a new_args <<<"$new_args"
+
       max_age="--max-age $last_bkp_time"
     fi
   fi
 
   local backup_options
-  old_IFS=$IFS
-  IFS=$'\n'; read -r -d '' -a backup_options <<< "$(jq -r -s '.[0].backupOptions | join("\n")' "$TEMP_SNAPSHOTS_FILE")"
-  IFS=$old_IFS
+  IFS=$'\n' read -r -d '' -a backup_options <<< "$(jq -r -s '.[0].backupOptions | join("\n")' "$TEMP_SNAPSHOTS_FILE")"
 
   rclone_show_cmd $cmd "$src_path" "${store_path}/caman-content" "${new_args[@]}" "${backup_options[@]}" --progress \
     --verbose --backup-dir="${store_path}/caman-backup/${bkp_dir}" $max_age || return 1
@@ -774,16 +820,14 @@ remove_sub(){
 
 # 删除一个备份快照
 cmd_remove(){
-  local snapshot_id
-  if [ -n "$1" ] && [ "$1" != "-f" ]; then
-    snapshot_id="$1"
+  local snapshot_id="$1"
+
+  if [ "$flag_force" != true ]; then
     read -p "Are you sure you want to remove the snapshot ${snapshot_id}? [yes/No] " reply leftover
     if [[ "$reply" != y* && "$reply" != Y* ]]; then
       echo "Remove snapshot cancelled"
       return 0
     fi
-  else
-    snapshot_id="$2"
   fi
 
   is_snapshot_empty "$snapshot_id" "show_usage_remove" || return 1
@@ -806,21 +850,19 @@ cmd_remove(){
     .[]' "$TEMP_SNAPSHOTS_FILE" > "$TEMP_SNAPSHOTS_FILE_NEW" || return 1
   put_snapshots_file || return 1
 
-  echo "Removed snapshot $snapshot_id"
+  echo "Removed successfully"
 }
 
 # 删除所有备份内容（所有快照）中某个时间点或某段时间之前的内容
 cmd_rm_before(){
   local del_time=$1
-  if [ -n "$1" ] && [ "$1" != "-f" ]; then
-    del_time="$1"
+
+  if [ "$flag_force" != true ]; then
     read -p "Are you sure you want to remove the content before ${del_time}? [yes/No] " reply leftover
     if [[ "$reply" != y* && "$reply" != Y* ]]; then
       echo "Remove content cancelled"
       return 0
     fi
-  else
-    del_time="$2"
   fi
 
   if [ -z "$del_time" ]; then
@@ -1047,15 +1089,6 @@ cmd_forget(){
 #    2) 在本次备份及以前备份的目录中的文件，都是在做本次备份时，已经被覆盖或删除的，所以不会出现在本次备份中。
 cmd_list(){
   local snapshot_id="$1"
-  local readable=false
-
-  if [ "$2" = "-h" ]; then
-    readable=true
-    shift
-  elif [ "$3" = "-h" ]; then
-    readable=true
-  fi
-
   local path=$(trim_slash "$2")
 
   is_snapshot_empty "$snapshot_id" "show_usage_list" || return 1
@@ -1087,7 +1120,7 @@ cmd_list(){
   local out
   out=$(jq -s 'map(.[]) | unique_by(.Name) | sort_by(.Name)' "${temp_dir}/list1.json" "${temp_dir}/list2.json")
 
-  if [ "$readable" != true ]; then
+  if [ "$flag_readable" != true ]; then
     echo "$out" | jq
   else
     echo "$out" | jq -r '(["Size", "Modified Time", "Name"] | @tsv),
@@ -1150,7 +1183,7 @@ cmd_snapshots(){
   get_snapshots_file || return 1
   local out=$(jq -s '.[1:]' "$TEMP_SNAPSHOTS_FILE")
 
-  if [ "$1" != "-h" ]; then
+  if [ "$flag_readable" != true ]; then
     echo "$out" | jq
   else
     echo "$out" | jq -r '(["ID", "Start Time", "End Time", "Size", "Backup Directory"] | @tsv),
@@ -1193,19 +1226,13 @@ cmd_snapshot(){
 
 # 查询库的大小
 cmd_size(){
-  local readable=false
-  if [ "$1" = "-h" ]; then
-    readable=true
-    shift
-  fi
-
   get_snapshots_file || return 1
   local size=$(jq -s -c '.[0].size' "$TEMP_SNAPSHOTS_FILE")
 
-  if [ "$readable" = true ]; then
-    echo $(get_readable_size $size)
-  else
+  if [ "$flag_readable" != true ]; then
     echo '{"bytes": '$size'}'
+  else
+    echo $(get_readable_size $size)
   fi
 }
 
@@ -1217,7 +1244,7 @@ cmd_info(){
 
 # 手动解除未能正常解的锁
 cmd_rmlock(){
-  if [ "$1" != "-f" ]; then
+  if [ "$flag_force" != true ]; then
     read -p "Are you sure you want to remove the lock on ${store_path}? [yes/No] " reply leftover
     if [[ "$reply" != y* && "$reply" != Y* ]]; then
       echo "Remove lock cancelled"
@@ -1281,7 +1308,17 @@ STORE_SNAPSHOTS_FILE=${store_path}/caman-meta/snapshots
 TEMP_SNAPSHOTS_FILE=${temp_dir}/snapshots
 TEMP_SNAPSHOTS_FILE_NEW=${temp_dir}/snapshots.new
 
-if ! cmd_$cmd "$@"; then
+has_force_option "$@"
+has_readable_option "$@"
+
+args=$(filter_option_self "-f"  "$@")
+IFS=$'\n' read -r -d '' -a args <<<"$args"
+
+args=$(filter_option_self "-h"  "${args[@]}")
+IFS=$'\n' read -r -d '' -a args <<<"$args"
+
+# 执行命令
+if ! cmd_$cmd "${args[@]}"; then
   echo "Failed to execute command: $cmd"
   exit 1
 fi
