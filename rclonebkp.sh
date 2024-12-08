@@ -552,7 +552,7 @@ get_depth(){
 # 初始化备份库
 # 被初始化的目录，应该要保持独立性，不能跟其他备份库有交集
 # 初始化时决定备份方式：全量备份还是增量备份
-init(){
+cmd_init(){
   is_empty_dir "$store_path" || return 1
 
   local type="full"
@@ -567,8 +567,9 @@ init(){
   trap 'unlock "$store_path"' RETURN
 
   local btime=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-  jq -n -c --argjson opts "$(printf '%s\n' "${backup_options[@]}" | jq -R | jq -s .)" '{"id":"'$ID_ALL'","btime":"'$btime'","etime":"",
-    "size":0,"backupType":"'$type'","backupOptions":$opts}' > "$TEMP_SNAPSHOTS_FILE_NEW"
+  jq -n -c --argjson opts "$(printf '%s\n' "${backup_options[@]}" | jq -R | jq -s 'map(select(length > 0))')" \
+    '{"id":"'$ID_ALL'","btime":"'$btime'","etime":"","size":0,"backupType":"'$type'","backupOptions":$opts}' \
+    > "$TEMP_SNAPSHOTS_FILE_NEW"
 
   rclone_show_cmd mkdir "${store_path}/caman-content"
   rclone_show_cmd mkdir "${store_path}/caman-backup"
@@ -579,7 +580,7 @@ init(){
 
 # 删除备份库
 # -f 强制删除
-delete(){
+cmd_delete(){
   if [ "$1" != "-f" ]; then
     read -p "Are you sure you want to delete the $store_path directory? [yes/No] " reply leftover
     if [[ "$reply" != y* && "$reply" != Y* ]]; then
@@ -602,7 +603,7 @@ delete(){
 # 使用 backup 命令的格式：
 # camankup store_path backup [-c] /path/to/backup other_flags...
 #
-backup(){
+cmd_backup(){
   local src_path="$1"
   if [ -z "$src_path" ]; then
     show_usage_backup
@@ -728,7 +729,7 @@ remove_sub(){
 }
 
 # 删除一个备份快照
-remove(){
+cmd_remove(){
   local snapshot_id
   if [ -n "$1" ] && [ "$1" != "-f" ]; then
     snapshot_id="$1"
@@ -765,7 +766,7 @@ remove(){
 }
 
 # 删除所有备份内容（所有快照）中某个时间点或某段时间之前的内容
-rm_before(){
+cmd_rm_before(){
   local del_time=$1
   if [ -n "$1" ] && [ "$1" != "-f" ]; then
     del_time="$1"
@@ -821,7 +822,7 @@ rm_before(){
 }
 
 # 按保留策略删除备份
-forget(){
+cmd_forget(){
   # 策略选项
   local keep_last=0
   local keep_hourly=0
@@ -1000,7 +1001,7 @@ forget(){
 # 2. caman-backup 下，在以后备份的目录中，修改时间在 cur_bkp_time 之前的文件。因为：
 #    1) 修改时间在这之后的，肯定不会出现在本次备份中；
 #    2) 在本次备份及以前备份的目录中的文件，都是在做本次备份时，已经被覆盖或删除的，所以不会出现在本次备份中。
-list(){
+cmd_list(){
   local snapshot_id="$1"
   local path=$(trim_slash "$2")
 
@@ -1033,7 +1034,7 @@ list(){
 }
 
 # 恢复快照
-restore(){
+cmd_restore(){
   local snapshot_id="$1"
   local backup_path="$2"     # 被恢复的路径，必须有，可以是 /
   local restore_path="$3"    # 恢复到哪个路径，必须有
@@ -1066,13 +1067,13 @@ restore(){
 }
 
 # 列出快照列表
-snapshots(){
+cmd_snapshots(){
   get_snapshots_file || return 1
   jq -s '.[1:]' "$TEMP_SNAPSHOTS_FILE"
 }
 
 # 查询快照信息
-snapshot(){
+cmd_snapshot(){
   local snapshot_id="$1"
   is_snapshot_empty "$snapshot_id" "show_usage_snapshot" || return 1
 
@@ -1090,19 +1091,19 @@ snapshot(){
 }
 
 # 查询库的大小
-size(){
+cmd_size(){
   get_snapshots_file || return 1
   jq -s -c '{bytes: .[0].size}' "$TEMP_SNAPSHOTS_FILE"
 }
 
 # 查询库的信息
-info(){
+cmd_info(){
   get_snapshots_file || return 1
   jq -s '.[0] + {"snapshotCount": (length - 1)}' "$TEMP_SNAPSHOTS_FILE"
 }
 
 # 手动解除未能正常解的锁
-rmlock(){
+cmd_rmlock(){
   if [ "$1" != "-f" ]; then
     read -p "Are you sure you want to remove the lock on ${store_path}? [yes/No] " reply leftover
     if [[ "$reply" != y* && "$reply" != Y* ]]; then
@@ -1115,7 +1116,7 @@ rmlock(){
 }
 
 # 显示各命令的帮助信息
-help(){
+cmd_help(){
   local cmd="$1"
   if [ -z "$cmd" ]; then
     show_usage
@@ -1137,7 +1138,7 @@ unknown_cmd(){
 # 主脚本入口
 if [ "$1" == "help" ]; then
   cmd="$2"
-  help $cmd
+  cmd_help $cmd
   exit 0
 fi
 
@@ -1146,7 +1147,7 @@ cmd="$2"
 shift 2
 
 if [ -z "$cmd" ] || [ -z "$store_path" ]; then
-  help 
+  cmd_help 
   exit 1
 fi
 
@@ -1167,7 +1168,7 @@ STORE_SNAPSHOTS_FILE=${store_path}/caman-meta/snapshots
 TEMP_SNAPSHOTS_FILE=${temp_dir}/snapshots
 TEMP_SNAPSHOTS_FILE_NEW=${temp_dir}/snapshots.new
 
-if ! $cmd "$@"; then
+if ! cmd_$cmd "$@"; then
   echo "Failed to execute command: $cmd"
   exit 1
 fi
