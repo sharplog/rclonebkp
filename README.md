@@ -24,9 +24,9 @@ a backup tool implemented with rclone
 ## 备份：
 使用本工具的 backup 命令进行备份。本工具在备份时已经使用了 --progress、--verbose，用户也可以添加 rclone 
 支持的其他选项，但以下选项不要用：
-  --backup-dir 本工具需要用来维护各备份快照的内容，不能由用户指定；
-  --max-age    在增量备份模式下，本工具会自动设置该选项，不能由用户指定。用户也要慎用--min-age，以免造成
-               不可预期的后果；
+- --backup-dir 本工具需要用来维护各备份快照的内容，不能由用户指定；
+- --max-age    在增量备份模式下，本工具会自动设置该选项，不能由用户指定。用户也要慎用--min-age，以免造成
+               不可预期的后果。
 
 ## store_path：
 本工具使用 store_path 来表示一个备份库，一个 store_path 对应一个备份库。store_path 是一个目录，本工具会
@@ -41,8 +41,8 @@ a backup tool implemented with rclone
 5. 删除备份快照：使用 remove 命令删除备份库中的备份快照；
 6. 按策略删除快照：使用 forget 命令按策略删除备份库中的备份快照；
 7. 删除旧数据：使用 rm_before 命令删除备份库中超过指定时间的数据；
-8. 删除备份库：使用 delete 命令删除备份库；
+8. 删除备份库：使用 delete 命令删除备份库。
 
 ## 本工具使用的 rclone 命令：
 本工具使用了如下 rclone 命令：
-copy、copyto、delete、lsf、lsjson、mkdir、move、purge、rmdirs、size、sync等
+copy、copyto、delete、lsf、lsjson、mkdir、move、purge、rmdirs、size、sync等。
