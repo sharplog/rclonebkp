@@ -735,8 +735,8 @@ cmd_backup(){
   local backup_options
   IFS=$'\n' read -r -d '' -a backup_options <<< "$(jq -r -s '.[0].backupOptions | join("\n")' "$TEMP_SNAPSHOTS_FILE")"
 
-  rclone_show_cmd $cmd "$src_path" "${store_path}/caman-content" "${new_args[@]}" "${backup_options[@]}" --progress \
-    --verbose --backup-dir="${store_path}/caman-backup/${bkp_dir}" $max_age || return 1
+  rclone_show_cmd $cmd "$src_path" "${store_path}/caman-content" "${backup_options[@]}" "${new_args[@]}" $max_age \
+    --progress --verbose --backup-dir="${store_path}/caman-backup/${bkp_dir}" || return 1
 
   local etime=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   local uuid=$(cat /proc/sys/kernel/random/uuid)
