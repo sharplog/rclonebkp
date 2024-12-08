@@ -96,7 +96,11 @@ Available Options:
 
 show_usage_list(){
   echo "Usage:
-  $0 <store_path> list <snapshot_id> [path]
+  $0 <store_path> list <snapshot_id> [path] [-h]
+
+Available Options:
+    -h: human readable output
+  path: path to list
 "
 }
 
@@ -275,25 +279,30 @@ get_readable_size(){
   local part=
   local unit="B"
 
+  if [[ "$size" -lt 0 ]]; then
+    echo ""
+    return
+  fi
+
   if [[ "$size" -ge 1024 ]]; then
     part=.$((size * 100 / 1024 % 100))
     size=$((size / 1024))
-    unit="KiB"
+    unit="K"
   fi
   if [[ "$size" -ge 1024 ]]; then
     part=.$((size * 100 / 1024 % 100))
     size=$((size / 1024))
-    unit="MiB"
+    unit="M"
   fi
   if [[ "$size" -ge 1024 ]]; then
     part=.$((size * 100 / 1024 % 100))
     size=$((size / 1024))
-    unit="GiB"
+    unit="G"
   fi
   if [[ "$size" -ge 1024 ]]; then
     part=.$((size * 100 / 1024 % 100))
     size=$((size / 1024))
-    unit="TiB"
+    unit="T"
   fi
   echo "$size$part $unit"
 }
@@ -1038,6 +1047,15 @@ cmd_forget(){
 #    2) 在本次备份及以前备份的目录中的文件，都是在做本次备份时，已经被覆盖或删除的，所以不会出现在本次备份中。
 cmd_list(){
   local snapshot_id="$1"
+  local readable=false
+
+  if [ "$2" = "-h" ]; then
+    readable=true
+    shift
+  elif [ "$3" = "-h" ]; then
+    readable=true
+  fi
+
   local path=$(trim_slash "$2")
 
   is_snapshot_empty "$snapshot_id" "show_usage_list" || return 1
@@ -1065,7 +1083,33 @@ cmd_list(){
   rclone lsjson "${store_path}/caman-backup" -R --max-depth $((depth + 1)) --min-age $cur_bkp_time --no-mimetype \
     --filter-from "$filter_file" | jq '[.[] | select(.Path | test("^[0-9]{14}/'${pre_path}'"))]' \
     > "${temp_dir}/list2.json"
-  jq -s 'map(.[]) | unique_by(.Name) | sort_by(.Name)' "${temp_dir}/list1.json" "${temp_dir}/list2.json"
+  
+  local out
+  out=$(jq -s 'map(.[]) | unique_by(.Name) | sort_by(.Name)' "${temp_dir}/list1.json" "${temp_dir}/list2.json")
+
+  if [ "$readable" != true ]; then
+    echo "$out" | jq
+  else
+    echo "$out" | jq -r '(["Size", "Modified Time", "Name"] | @tsv),
+      (["----------", "----------", "----------"] | @tsv),
+      (.[] | [.Size, .ModTime, .Name, .IsDir] | @tsv)' |
+    while IFS=$'\t' read -r size mtime name isDir; do
+      # 如果是表头或分隔符，则直接输出
+      if [[ "$size" == "Size" ]] || [[ "$size" == "----------" ]]; then
+        printf "%-10s    %-20s %s\n" "$size" "$mtime" "$name"
+      else
+        fmt_mtime=$(date -d "$mtime" "+%Y-%m-%d %H:%M:%S")
+        fmt_size=$(get_readable_size "$size")
+        dir=""
+        if [ "$isDir" == "true" ]; then
+          dir="/"
+        fi
+        # 输出表格行
+        printf "%10s    %-20s %s\n" "$fmt_size" "$fmt_mtime" "$name$dir"
+      fi
+    done
+    echo
+  fi
 }
 
 # 恢复快照
@@ -1111,7 +1155,7 @@ cmd_snapshots(){
   else
     echo "$out" | jq -r '(["ID", "Start Time", "End Time", "Size", "Backup Directory"] | @tsv),
       (["----------", "----------", "----------", "----------", "----------"] | @tsv),
-      (.[] | select(.id != "all") | [.id[:8], .btime, .etime, .size, .backupDir] | @tsv)' |
+      (.[] | [.id[:8], .btime, .etime, .size, .backupDir] | @tsv)' |
     while IFS=$'\t' read -r id btime etime size backupDir; do
       # 如果是表头或分隔符，则直接输出
       if [[ "$id" == "ID" ]] || [[ "$id" == "----------" ]]; then
@@ -1121,7 +1165,7 @@ cmd_snapshots(){
         fmt_etime=$(date -d "$etime" "+%Y-%m-%d %H:%M:%S")
         fmt_size=$(get_readable_size "$size")
         # 输出表格行
-        printf "%-10s %-20s %-20s %-15s %-16s\n" "$id" "$fmt_btime" "$fmt_etime" "$fmt_size" "$backupDir"
+        printf "%-10s %-20s %-20s %12s    %-16s\n" "$id" "$fmt_btime" "$fmt_etime" "$fmt_size" "$backupDir"
       fi
     done
     echo
