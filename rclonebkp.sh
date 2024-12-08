@@ -138,7 +138,7 @@ show_usage_size(){
   $0 <store_path> size [-h]
 
 Available Options:
-  -h: human-readable format (default: bytes)
+  -h: human-readable format (default: json format)
 "
 }
 
@@ -150,7 +150,10 @@ show_usage_snapshot(){
 
 show_usage_snapshots(){
   echo "Usage:
-  $0 <store_path> snapshots
+  $0 <store_path> snapshots [-h]
+
+Available Options:
+  -h: human-readable format (default: json format)
 "
 }
 
@@ -1101,7 +1104,29 @@ cmd_restore(){
 # 列出快照列表
 cmd_snapshots(){
   get_snapshots_file || return 1
-  jq -s '.[1:]' "$TEMP_SNAPSHOTS_FILE"
+  local out=$(jq -s '.[1:]' "$TEMP_SNAPSHOTS_FILE")
+
+  if [ "$1" != "-h" ]; then
+    echo "$out" | jq
+  else
+    echo "$out" | jq -r '(["ID", "Start Time", "End Time", "Size", "Backup Directory"] | @tsv),
+      (["----------", "----------", "----------", "----------", "----------"] | @tsv),
+      (.[] | select(.id != "all") | [.id[:8], .btime, .etime, .size, .backupDir] | @tsv)' |
+    while IFS=$'\t' read -r id btime etime size backupDir; do
+      # 如果是表头或分隔符，则直接输出
+      if [[ "$id" == "ID" ]] || [[ "$id" == "----------" ]]; then
+        printf "%-10s %-20s %-20s %-15s %-16s\n" "$id" "$btime" "$etime" "$size" "$backupDir"
+      else
+        fmt_btime=$(date -d "$btime" "+%Y-%m-%d %H:%M:%S")
+        fmt_etime=$(date -d "$etime" "+%Y-%m-%d %H:%M:%S")
+        fmt_size=$(get_readable_size "$size")
+        # 输出表格行
+        printf "%-10s %-20s %-20s %-15s %-16s\n" "$id" "$fmt_btime" "$fmt_etime" "$fmt_size" "$backupDir"
+      fi
+    done
+    echo
+  fi
+
 }
 
 # 查询快照信息
