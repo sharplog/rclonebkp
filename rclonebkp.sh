@@ -135,7 +135,10 @@ Available Options:
 
 show_usage_size(){
   echo "Usage:
-  $0 <store_path> size
+  $0 <store_path> size [-h]
+
+Available Options:
+  -h: human-readable format (default: bytes)
 "
 }
 
@@ -261,6 +264,35 @@ get_size_bytes(){
       echo "0"
       ;;
   esac
+}
+
+# 将大小转换为可读格式
+get_readable_size(){
+  local size="$1"
+  local part=
+  local unit="B"
+
+  if [[ "$size" -ge 1024 ]]; then
+    part=.$((size * 100 / 1024 % 100))
+    size=$((size / 1024))
+    unit="KiB"
+  fi
+  if [[ "$size" -ge 1024 ]]; then
+    part=.$((size * 100 / 1024 % 100))
+    size=$((size / 1024))
+    unit="MiB"
+  fi
+  if [[ "$size" -ge 1024 ]]; then
+    part=.$((size * 100 / 1024 % 100))
+    size=$((size / 1024))
+    unit="GiB"
+  fi
+  if [[ "$size" -ge 1024 ]]; then
+    part=.$((size * 100 / 1024 % 100))
+    size=$((size / 1024))
+    unit="TiB"
+  fi
+  echo "$size$part $unit"
 }
 
 # Filter out some argument and its value
@@ -1092,8 +1124,20 @@ cmd_snapshot(){
 
 # 查询库的大小
 cmd_size(){
+  local readable=false
+  if [ "$1" = "-h" ]; then
+    readable=true
+    shift
+  fi
+
   get_snapshots_file || return 1
-  jq -s -c '{bytes: .[0].size}' "$TEMP_SNAPSHOTS_FILE"
+  local size=$(jq -s -c '.[0].size' "$TEMP_SNAPSHOTS_FILE")
+
+  if [ "$readable" = true ]; then
+    echo $(get_readable_size $size)
+  else
+    echo '{"bytes": '$size'}'
+  fi
 }
 
 # 查询库的信息
