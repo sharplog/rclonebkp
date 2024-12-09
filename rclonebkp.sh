@@ -86,7 +86,10 @@ show_usage_help(){
 
 show_usage_info(){
   echo "Usage:
-  $0 <store_path> info
+  $0 <store_path> info [-h]
+
+Available Options:
+  -h: human-readable format (default: json format)
 "
 }
 
@@ -105,7 +108,7 @@ show_usage_list(){
   $0 <store_path> list <snapshot_id> [path] [-h]
 
 Available Options:
-    -h: human readable output
+    -h: human-readable format (default: json format)
   path: path to list
 "
 }
@@ -163,7 +166,10 @@ Available Options:
 
 show_usage_snapshot(){
   echo "Usage:
-  $0 <store_path> snapshot <snapshot_id>
+  $0 <store_path> snapshot <snapshot_id> [-h]
+
+Available Options:
+  -h: human-readable format (default: json format)
 "
 }
 
@@ -1249,14 +1255,29 @@ cmd_snapshot(){
   get_snapshots_file || return 1
   g_out=$(jq -s '.[] | select(.id | startswith("'$snapshot_id'"))' "$TEMP_SNAPSHOTS_FILE")
   if [ $? -ne 0 ]; then
-    echo $g_out
+    echo "$g_out"
     return 1
   elif [ -z "$g_out" ]; then
     echo "Snapshot $snapshot_id not found"
     return 1
   fi
 
-  echo $g_out | jq 
+  if [ "$flag_readable" != true ]; then
+    echo "$g_out" | jq
+  else
+    echo "$g_out" | jq -r '[.id, .btime, .etime, .size, .backupDir] | @tsv' |
+    while IFS=$'\t' read -r id btime etime size backupDir; do
+      fmt_btime=$(date -d "$btime" "+%Y-%m-%d %H:%M:%S")
+      fmt_etime=$(date -d "$etime" "+%Y-%m-%d %H:%M:%S")
+      fmt_size=$(get_readable_size "$size")
+      printf "               ID: %-s\n" "$id" 
+      printf "       Start Time: %-s\n" "$fmt_btime"
+      printf "         End Time: %-s\n" "$fmt_etime"
+      printf "             Size: %-s\n" "$fmt_size" 
+      printf " Backup Directory: %-s\n" "$backupDir"
+    done
+    echo
+  fi
 }
 
 # 查询库的大小
@@ -1273,8 +1294,30 @@ cmd_size(){
 
 # 查询库的信息
 cmd_info(){
+  local out
   get_snapshots_file || return 1
-  jq -s '.[0] + {"snapshotCount": (length - 1)}' "$TEMP_SNAPSHOTS_FILE"
+  
+  out=$(jq -s '.[0] + {"snapshotCount": (length - 1)}' "$TEMP_SNAPSHOTS_FILE")
+  if [ $? -ne 0 ]; then
+    echo "$out"
+    return 1
+  fi
+
+  if [ "$flag_readable" != true ]; then
+    echo "$out" | jq
+  else
+    echo "$out" | jq -r '[.btime, .size, .backupType, (.backupOptions | map("\(.|@sh)") | join(" ")), .snapshotCount] | @tsv' |
+    while IFS=$'\t' read -r btime size backupType backupOptions snapshotCount; do
+      fmt_btime=$(date -d "$btime" "+%Y-%m-%d %H:%M:%S")
+      fmt_size=$(get_readable_size "$size")
+      printf "      Init Time: %-s\n" "$fmt_btime"
+      printf "           Size: %-s\n" "$fmt_size" 
+      printf "    Backup Type: %-s\n" "$backupType" 
+      printf " Backup Options: %-s\n" "$backupOptions" 
+      printf " Snapshot Count: %-s\n" "$snapshotCount"
+    done
+    echo
+  fi
 }
 
 # 手动解除未能正常解的锁
@@ -1337,7 +1380,6 @@ if [ "$cmd" != "init" ] && ! is_backup "$store_path"; then
 fi
 
 temp_dir=$(mktemp -d --suffix=.caman)
-trap 'rm -rf "$temp_dir"' EXIT
 
 STORE_SNAPSHOTS_FILE=${store_path}/caman-meta/snapshots
 TEMP_SNAPSHOTS_FILE=${temp_dir}/snapshots
@@ -1357,3 +1399,6 @@ if ! cmd_$cmd "${args[@]}"; then
   echo "Failed to execute command: $cmd"
   exit 1
 fi
+
+# 执行成功后才清理临时目录，失败时不清理，可以查看日志
+rm -rf "$temp_dir"
