@@ -7,7 +7,7 @@
 ID_ALL="all"
 DIR_NOT_FOUND="directory not found"
 INCREMENTAL="incremental"
-CMD_LIST=("backup" "delete" "forget" "help" "info" "init" "list" "remove" "restore" "rm_before" "rmlock" "size" "snapshot" "snapshots")
+CMD_LIST=("backup" "delete" "forget" "help" "info" "init" "list" "remove" "restore" "rm_before" "rmlock" "set" "size" "snapshot" "snapshots")
 STORE_SNAPSHOTS_FILE=
 TEMP_SNAPSHOTS_FILE=
 TEMP_SNAPSHOTS_FILE_NEW=
@@ -33,6 +33,7 @@ Available Commands:
   restore      Restore a snapshot.
   rm_before    Remove backup content before a datetime.
   rmlock       Remove the lock file manually.
+  set          Set the configuration of the backup strore path.
   size         Show the size of the backup strore path.
   snapshot     Show a snapshot info.
   snapshots    List snapshots.
@@ -139,6 +140,15 @@ show_usage_rmlock(){
 
 Available Options:
   -f: force remove lock, not ask for confirmation
+"
+}
+
+show_usage_set(){
+  echo "Usage:
+  $0 <store_path> set <option name> [options...]
+
+Available Option Names:
+  backupOptions: backup options, include all the following options
 "
 }
 
@@ -664,6 +674,31 @@ cmd_init(){
   put_snapshots_file || return 1
 
   echo "Init successful"
+}
+
+cmd_set(){
+  local opt_list=("backupOptions")
+  local option_name="$1"
+  shift
+
+
+  if [[ ! " ${opt_list[@]} " =~ " $option_name " ]]; then
+      echo "Unknown option: $option_name"
+      show_usage_set
+      return 1
+  fi
+
+  local option_value=("$@")
+
+  lock $store_path || return 1
+  trap 'unlock "$store_path"' RETURN
+  get_snapshots_file || return 1
+
+  jq -c -s --argjson opts "$(printf '%s\n' "${option_value[@]}" | jq -R | jq -s 'map(select(length > 0))')" \
+    '.[0].'${option_name}' = $opts | .[]' "$TEMP_SNAPSHOTS_FILE" > "$TEMP_SNAPSHOTS_FILE_NEW" || return 1
+  put_snapshots_file || return 1
+
+  echo "Option set successfully"
 }
 
 # 删除备份库
