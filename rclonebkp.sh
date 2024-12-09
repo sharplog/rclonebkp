@@ -95,10 +95,11 @@ Available Options:
 
 show_usage_init(){
   echo "Usage:
-  $0 <store_path> init [-i] [options...]
+  $0 <store_path> init [-i] [-s source_path] [options...]
 
 Available Options:
   -i: incremental backup (default: full backup)
+  -s: source path
   other options suported by rclone copy/sync
 "
 }
@@ -664,6 +665,17 @@ cmd_init(){
     type="$INCREMENTAL"
     shift
   fi
+
+  local source_path="$2"
+  if [ "$1" == "-s" ]; then
+    if [[ $source_path == -* ]]; then
+      echo "not set source path"
+      show_usage_init
+      return 1
+    fi
+    shift 2
+  fi
+
   local backup_options=("$@")
 
   echo "init $store_path"
@@ -672,7 +684,7 @@ cmd_init(){
 
   local btime=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   jq -n -c --argjson opts "$(printf '%s\n' "${backup_options[@]}" | jq -R | jq -s 'map(select(length > 0))')" \
-    '{"id":"'$ID_ALL'","btime":"'$btime'","etime":"","size":0,"backupType":"'$type'","backupOptions":$opts}' \
+    '{"id":"'$ID_ALL'","btime":"'$btime'","etime":"","size":0,"backupType":"'$type'","sourcePath":"'$source_path'","backupOptions":$opts}' \
     > "$TEMP_SNAPSHOTS_FILE_NEW"
 
   rclone_show_cmd mkdir "${store_path}/caman-content"
@@ -1306,16 +1318,15 @@ cmd_info(){
   if [ "$flag_readable" != true ]; then
     echo "$out" | jq
   else
-    echo "$out" | jq -r '[.btime, .size, .backupType, (.backupOptions | map("\(.|@sh)") | join(" ")), .snapshotCount] | @tsv' |
-    while IFS=$'\t' read -r btime size backupType backupOptions snapshotCount; do
-      fmt_btime=$(date -d "$btime" "+%Y-%m-%d %H:%M:%S")
-      fmt_size=$(get_readable_size "$size")
-      printf "      Init Time: %-s\n" "$fmt_btime"
-      printf "           Size: %-s\n" "$fmt_size" 
-      printf "    Backup Type: %-s\n" "$backupType" 
-      printf " Backup Options: %-s\n" "$backupOptions" 
-      printf " Snapshot Count: %-s\n" "$snapshotCount"
-    done
+    local btime=$(echo "$out" | jq -r '.btime')
+    local fmt_btime=$(date -d "$btime" "+%Y-%m-%d %H:%M:%S")
+    local fmt_size=$(get_readable_size "$(echo "$out" | jq -r '.size')")
+    printf "      Init Time: %-s\n" "$fmt_btime"
+    printf "    Backup Type: %-s\n" "$(echo "$out" | jq -r '.backupType')" 
+    printf "    Source Path: %-s\n" "$(echo "$out" | jq -r '.sourcePath')" 
+    printf " Backup Options: %-s\n" "$(echo "$out" | jq -r '(.backupOptions | map("\(.|@sh)") | join(" "))')" 
+    printf " Snapshot Count: %-s\n" "$(echo "$out" | jq -r '.snapshotCount')"
+    printf "           Size: %-s\n" "$fmt_size" 
     echo
   fi
 }
