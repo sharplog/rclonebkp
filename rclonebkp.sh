@@ -670,7 +670,7 @@ cmd_init(){
   local source_path="$2"
   if [ "$1" == "-s" ]; then
     if [[ $source_path == -* ]]; then
-      echo "not set source path"
+      echo "Not set source path"
       show_usage_init
       return 1
     fi
@@ -759,16 +759,23 @@ cmd_delete(){
 # camankup store_path backup [-c] /path/to/backup other_flags...
 #
 cmd_backup(){
-  local src_path="$1"
-  if [ -z "$src_path" ]; then
-    show_usage_backup
-    return 1
-  fi
-  shift 1
-
   lock "$store_path" || return 1
   trap 'unlock "$store_path"' RETURN
   get_snapshots_file || return 1
+
+  local src_path
+  if [[ -z "$1" || "$1" == -* ]]; then
+    src_path=$(jq -r -s '.[0].sourcePath' "$TEMP_SNAPSHOTS_FILE")
+  else
+    src_path="$1"
+    shift 1
+  fi
+
+  if [ -z "$src_path" ]; then
+    echo "Source path is empty"
+    show_usage_backup
+    return 1
+  fi
 
   local backup_type=$(jq -r -s '.[0].backupType' "$TEMP_SNAPSHOTS_FILE")
   local last_bkp_size=0
