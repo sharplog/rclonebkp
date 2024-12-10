@@ -149,10 +149,11 @@ Available Options:
 
 show_usage_set(){
   echo "Usage:
-  $0 <store_path> set <option name> [options...]
+  $0 <store_path> set <option name> <option value>
 
 Available Option Names:
   backupOptions: backup options, include all the following options
+     sourcePath: source path
 "
 }
 
@@ -695,7 +696,7 @@ cmd_init(){
 }
 
 cmd_set(){
-  local opt_list=("backupOptions")
+  local opt_list=("backupOptions" "sourcePath")
   local option_name="$1"
   shift
 
@@ -706,14 +707,27 @@ cmd_set(){
       return 1
   fi
 
-  local option_value=("$@")
+  if [[ "$#" -eq 0 ]]; then
+    echo "Missing value for option: $option_name"
+    show_usage_set
+    return 1
+  fi
 
   lock $store_path || return 1
   trap 'unlock "$store_path"' RETURN
   get_snapshots_file || return 1
 
-  jq -c -s --argjson opts "$(printf '%s\n' "${option_value[@]}" | jq -R | jq -s 'map(select(length > 0))')" \
-    '.[0].'${option_name}' = $opts | .[]' "$TEMP_SNAPSHOTS_FILE" > "$TEMP_SNAPSHOTS_FILE_NEW" || return 1
+  local option_value
+  if [[ $option_name == "backupOptions" ]]; then
+    option_value=("$@")
+    jq -c -s --argjson opts "$(printf '%s\n' "${option_value[@]}" | jq -R | jq -s 'map(select(length > 0))')" \
+      '.[0].'${option_name}' = $opts | .[]' "$TEMP_SNAPSHOTS_FILE" > "$TEMP_SNAPSHOTS_FILE_NEW" || return 1
+  else
+    option_value="$1"
+    jq -c -s --arg opts "$option_value" \
+      '.[0].'${option_name}' = $opts | .[]' "$TEMP_SNAPSHOTS_FILE" > "$TEMP_SNAPSHOTS_FILE_NEW" || return 1
+  fi
+
   put_snapshots_file || return 1
 
   echo "Option set successfully"
