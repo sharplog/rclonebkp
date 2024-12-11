@@ -685,8 +685,14 @@ cmd_init(){
 
   local btime=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   jq -n -c --argjson opts "$(printf '%s\n' "${backup_options[@]}" | jq -R | jq -s 'map(select(length > 0))')" \
-    '{"id":"'$ID_ALL'","btime":"'$btime'","etime":"","size":0,"backupType":"'$type'","sourcePath":"'$source_path'","backupOptions":$opts}' \
-    > "$TEMP_SNAPSHOTS_FILE_NEW"
+    '{"id":"'$ID_ALL'",
+      "btime":"'$btime'",
+      "etime":"",
+      "size":0,
+      "backupType":"'$type'",
+      "sourcePath":"'$source_path'",
+      "backupOptions":$opts,
+      "forgetPolicy":[]}' > "$TEMP_SNAPSHOTS_FILE_NEW"
 
   rclone_show_cmd mkdir "${store_path}/caman-content"
   rclone_show_cmd mkdir "${store_path}/caman-backup"
@@ -696,7 +702,7 @@ cmd_init(){
 }
 
 cmd_set(){
-  local opt_list=("backupOptions" "sourcePath")
+  local opt_list=("backupOptions" "forgetPolicy" "sourcePath")
   local option_name="$1"
   shift
 
@@ -718,7 +724,7 @@ cmd_set(){
   get_snapshots_file || return 1
 
   local option_value
-  if [[ $option_name == "backupOptions" ]]; then
+  if [[ $option_name != "sourcePath" ]]; then
     option_value=("$@")
     jq -c -s --argjson opts "$(printf '%s\n' "${option_value[@]}" | jq -R | jq -s 'map(select(length > 0))')" \
       '.[0].'${option_name}' = $opts | .[]' "$TEMP_SNAPSHOTS_FILE" > "$TEMP_SNAPSHOTS_FILE_NEW" || return 1
@@ -998,6 +1004,17 @@ cmd_forget(){
   local keep_within_yearly=""
   local has_policy=false
 
+  lock "$store_path" || return 1
+  trap 'unlock "$store_path"' RETURN
+
+  get_snapshots_file || return 1
+
+  local forget_policy=()
+  IFS=$'\n' read -r -d '' -a forget_policy <<< "$(jq -r -s '.[0].forgetPolicy | join("\n")' "$TEMP_SNAPSHOTS_FILE")"
+  
+  local combined_args=("${forget_policy[@]}" "$@")
+  set -- "${combined_args[@]}"
+
   # 解析命令行参数
   while [[ $# -gt 0 ]]; do
     key="$1"
@@ -1062,11 +1079,6 @@ cmd_forget(){
   [[ "$keep_weekly" =~ ^[0-9]+$ ]] || { echo "keep_weekly must be a number"; return 1; }
   [[ "$keep_monthly" =~ ^[0-9]+$ ]] || { echo "keep_monthly must be a number"; return 1; }
   [[ "$keep_yearly" =~ ^[0-9]+$ ]] || { echo "keep_yearly must be a number"; return 1; }
-
-  lock "$store_path" || return 1
-  trap 'unlock "$store_path"' RETURN
-
-  get_snapshots_file || return 1
 
   local last_bkp_time
   last_bkp_time=$(jq -r -s '.[-1].btime' "$TEMP_SNAPSHOTS_FILE") || return 1
@@ -1345,7 +1357,8 @@ cmd_info(){
     printf "      Init Time: %-s\n" "$fmt_btime"
     printf "    Backup Type: %-s\n" "$(echo "$out" | jq -r '.backupType')" 
     printf "    Source Path: %-s\n" "$(echo "$out" | jq -r '.sourcePath')" 
-    printf " Backup Options: %-s\n" "$(echo "$out" | jq -r '(.backupOptions | map("\(.|@sh)") | join(" "))')" 
+    printf " Backup Options: %-s\n" "$(echo "$out" | jq -r '(.backupOptions | map(if test("\\s") then "\(.|@sh)" else . end) | join(" "))')" 
+    printf "  Forget Policy: %-s\n" "$(echo "$out" | jq -r '(.forgetPolicy | join(" "))')" 
     printf " Snapshot Count: %-s\n" "$(echo "$out" | jq -r '.snapshotCount')"
     printf "           Size: %-s\n" "$fmt_size" 
     echo
