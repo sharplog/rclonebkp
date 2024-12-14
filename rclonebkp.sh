@@ -153,6 +153,7 @@ show_usage_set(){
 
 Available Option Names:
   backupOptions: backup options, include all the following options
+   forgetPolicy: forget policy
      sourcePath: source path
 "
 }
@@ -667,13 +668,14 @@ cmd_init(){
     shift
   fi
 
-  local source_path="$2"
+  local source_path=
   if [ "$1" == "-s" ]; then
-    if [[ $source_path == -* ]]; then
+    if [[ $2 == -* ]]; then
       echo "Not set source path"
       show_usage_init
       return 1
     fi
+    source_path="$2"
     shift 2
   fi
 
